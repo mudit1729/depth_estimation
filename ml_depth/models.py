@@ -175,7 +175,8 @@ class StereoTransformerNet(nn.Module):
                  lora_alpha=32, 
                  d_model=384,  # DINOv2-small embedding dimension
                  nhead=8,
-                 num_cross_attn_layers=2):
+                 num_cross_attn_layers=4,  # Increased from 2 to 4
+                 num_self_attn_layers=4):  # Added explicit parameter
         """
         Stereo Transformer using DINOv2 models with LoRA adapters and a ResNet-style refinement module.
         
@@ -185,7 +186,8 @@ class StereoTransformerNet(nn.Module):
             lora_alpha: LoRA alpha parameter.
             d_model: Embedding dimension.
             nhead: Number of attention heads.
-            num_cross_attn_layers: Number of cross-attention layers.
+            num_cross_attn_layers: Number of cross-attention layers (default: 4).
+            num_self_attn_layers: Number of self-attention layers (default: 4).
         """
         super(StereoTransformerNet, self).__init__()
         
@@ -209,18 +211,29 @@ class StereoTransformerNet(nn.Module):
         # Cross-attention layers using simple multihead attention
         self.cross_attn_layers = nn.ModuleList([
             SimpleMultiheadAttention(dim=d_model, num_heads=nhead, dropout=0.1)
-            for _ in range(num_cross_attn_layers)
+            for _ in range(num_cross_attn_layers)  # Increased to 4 cross-attention layers
         ])
         
         # Self-attention layers using simple multihead attention
         self.self_attn_layers = nn.ModuleList([
             SimpleMultiheadAttention(dim=d_model, num_heads=nhead, dropout=0.1)
-            for _ in range(2)  # Two self-attention layers
+            for _ in range(num_self_attn_layers)  # Increased to 4 self-attention layers
         ])
         
-        # Layer normalization layers
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
+        # Layer normalization layers for each attention layer
+        # Cross-attention layer norms
+        self.cross_attn_norms = nn.ModuleList([
+            nn.LayerNorm(d_model) 
+            for _ in range(num_cross_attn_layers)
+        ])
+        
+        # Self-attention layer norms
+        self.self_attn_norms = nn.ModuleList([
+            nn.LayerNorm(d_model) 
+            for _ in range(num_self_attn_layers)
+        ])
+        
+        # Final layer norm
         self.norm_out = nn.LayerNorm(d_model)
         
         # Linear layer before disparity head
@@ -263,13 +276,16 @@ class StereoTransformerNet(nn.Module):
         # Apply cross-attention between left and right embeddings
         # This allows the model to find correspondences between the left and right views
         attn_output = left_embeddings
-        for cross_attn in self.cross_attn_layers:
-            attn_output = self.norm1(attn_output + cross_attn(attn_output, right_embeddings, right_embeddings))
+        for i, cross_attn in enumerate(self.cross_attn_layers):
+            # Apply cross-attention and add residual connection
+            cross_attn_output = cross_attn(attn_output, right_embeddings, right_embeddings)
+            attn_output = self.cross_attn_norms[i](attn_output + cross_attn_output)
         
         # Apply self-attention layers to refine the features
-        for self_attn in self.self_attn_layers:
-            attn_out = self_attn(attn_output, attn_output, attn_output)
-            attn_output = self.norm2(attn_output + attn_out)
+        for i, self_attn in enumerate(self.self_attn_layers):
+            # Apply self-attention and add residual connection
+            self_attn_output = self_attn(attn_output, attn_output, attn_output)
+            attn_output = self.self_attn_norms[i](attn_output + self_attn_output)
         
         # Apply linear layer with ReLU activation
         linear_output = F.relu(self.linear(attn_output))
