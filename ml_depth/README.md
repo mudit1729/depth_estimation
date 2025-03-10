@@ -1,6 +1,6 @@
-# Stereo Depth Estimation with Transformers
+# DINOv2-LoRA Stereo Depth Estimation
 
-This module implements a deep learning approach for stereo depth estimation using a transformer-based architecture.
+This module implements a deep learning approach for stereo depth estimation using DINOv2 vision transformers with LoRA adaptation.
 
 ## Architecture
 
@@ -11,10 +11,12 @@ depth = (focal_length * baseline) / disparity
 ```
 
 The architecture consists of:
-1. A CNN backbone to extract features from both images
-2. Feature concatenation to form a cost volume
-3. Transformer encoder layers to fuse spatial context
-4. A regression head to predict disparity values
+
+1. **Dual DINOv2-small Backbone**: Two separate vision transformers process the left and right stereo images independently, extracting rich visual features
+2. **LoRA Adapters**: Low-rank adaptation applied to both DINOv2 models, enabling efficient fine-tuning with minimal parameter overhead
+3. **Cross-Attention Fusion**: Specialized attention mechanism that correlates features between left and right views to establish stereo correspondence
+4. **Self-Attention Refinement**: Two self-attention layers that refine the spatial features with global context
+5. **Disparity Head**: Final regression pathway to predict disparity values at each pixel location
 
 ## Usage
 
@@ -48,10 +50,19 @@ Important parameters:
 - `--output_dir`: Directory to save evaluation results (default: 'results')
 - `--max_samples`: Maximum number of samples to evaluate (default: all)
 
+## Benefits of the Architecture
+
+1. **Leveraging Foundation Models**: Uses the powerful DINOv2 vision transformer that has been pretrained on diverse image datasets, providing robust visual representations
+2. **Parameter Efficiency**: LoRA adapters reduce the number of trainable parameters by modifying only a small subset of the network
+3. **Stereo Correspondence**: Cross-attention effectively learns to match features between the two views
+4. **Global Context**: Transformer architecture captures long-range dependencies that are crucial for consistent depth estimation
+
 ## Requirements
 
 - PyTorch
 - torchvision
+- transformers (Hugging Face)
+- peft (Parameter-Efficient Fine-Tuning)
 - NumPy
 - matplotlib
 - opencv-python
