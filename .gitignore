@@ -1,0 +1,10 @@
+# Data files
+data_scene_flow.zip
+data_scene_flow_calib.zip
+devkit_scene_flow.zip
+
+# Directories
+__pycache__/
+*.py[cod]
+*$py.class
+.DS_Store
