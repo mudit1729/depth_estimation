@@ -92,6 +92,18 @@ The model outputs a disparity map that can be converted to depth using the formu
 depth = (focal_length * baseline) / disparity
 ```
 
+## Evaluation Metrics
+
+Performance is measured using industry-standard stereo vision metrics:
+
+- **D1**: Percentage of disparity outliers (>3px error or >5% of ground truth)
+- **D2**: Percentage of disparity outliers with stricter threshold (>2px or >3%)
+- **RMSE**: Root Mean Square Error for disparity and depth
+- **Abs Rel**: Absolute Relative Error
+- **δ < 1.25**: Percentage of predictions within 25% of ground truth
+
+All metrics are tracked during training and visualized in TensorBoard.
+
 ## Dataset
 
 This project uses the KITTI Stereo 2015 dataset. The dataset is not included in this repository and can be downloaded from the [KITTI website](http://www.cvlibs.net/datasets/kitti/eval_scene_flow.php).

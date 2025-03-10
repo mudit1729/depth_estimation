@@ -48,7 +48,7 @@ tensorboard --logdir=runs
 
 The TensorBoard interface provides:
 - Training and validation loss curves
-- Disparity metrics (RMSE, Absolute Relative Error)
+- Disparity metrics (RMSE, Absolute Relative Error, D1, D2)
 - Input image visualization
 - Ground truth and predicted disparity maps
 - Error maps showing prediction accuracy
@@ -74,6 +74,26 @@ Important parameters:
 2. **Parameter Efficiency**: LoRA adapters reduce the number of trainable parameters by modifying only a small subset of the network
 3. **Stereo Correspondence**: Cross-attention effectively learns to match features between the two views
 4. **Global Context**: Transformer architecture captures long-range dependencies that are crucial for consistent depth estimation
+
+## Evaluation Metrics
+
+The model is evaluated using several disparity and depth metrics:
+
+1. **Disparity Metrics**:
+   - **RMSE**: Root Mean Square Error of disparity prediction
+   - **MAE**: Mean Absolute Error of disparity prediction
+   - **Abs Rel**: Absolute Relative Error
+   - **D1**: Percentage of outlier pixels where error > 3px OR > 5% of ground truth (standard KITTI metric)
+   - **D2**: Percentage of outlier pixels where error > 2px OR > 3% of ground truth (stricter metric)
+   - **δ < 1.25**: Percentage of pixels with ratio of predicted/GT or GT/predicted < 1.25
+
+2. **Depth Metrics**:
+   - **RMSE**: Root Mean Square Error of depth prediction
+   - **MAE**: Mean Absolute Error of depth prediction
+   - **Abs Rel**: Absolute Relative Error
+   - **δ < 1.25**: Percentage of pixels with ratio of predicted/GT or GT/predicted < 1.25
+
+All metrics are computed only on valid pixels (those with ground truth disparity available).
 
 ## Dataset Handling
 
