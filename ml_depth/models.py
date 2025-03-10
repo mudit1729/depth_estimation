@@ -155,16 +155,38 @@ class ResNetRefinementModule(nn.Module):
         # Final convolution to predict the residual offset
         self.final_conv = nn.Conv2d(base_channels, 1, kernel_size=3, stride=1, padding=1)
         
+        # Additional convolutions for better disparity refinement
+        self.offset_refinement = nn.Sequential(
+            nn.Conv2d(base_channels, base_channels, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(base_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(base_channels, base_channels//2, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(base_channels//2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(base_channels//2, 1, kernel_size=3, stride=1, padding=1)
+        )
+        
     def forward(self, image, coarse_disp):
         # image: [B, 3, H, W], coarse_disp: [B, 1, H, W]
         x = torch.cat([image, coarse_disp], dim=1)  # [B, 4, H, W]
         x = self.initial_conv(x)
         x = self.initial_bn(x)
         x = self.initial_relu(x)
-        x = self.res_blocks(x)
-        disp_offset = self.final_conv(x)
-        refined_disp = coarse_disp + disp_offset
-        refined_disp = F.softplus(refined_disp)  # Ensure positive disparities
+        
+        # Process through residual blocks
+        res_features = self.res_blocks(x)
+        
+        # Generate refined offset using the enhanced refinement path
+        disp_offset = self.offset_refinement(res_features)
+        
+        # Apply the offset as a residual correction
+        # We scale the offset to be a fraction of the coarse disparity
+        # to prevent extreme changes
+        refined_disp = coarse_disp + 0.1 * disp_offset * coarse_disp
+        
+        # Ensure positive disparities while preserving the scaling
+        refined_disp = F.softplus(refined_disp)
+        
         return refined_disp
 
 
@@ -239,12 +261,21 @@ class StereoTransformerNet(nn.Module):
         # Linear layer before disparity head
         self.linear = nn.Linear(d_model, d_model)
         
-        # Disparity head for regression
+        # Enhanced disparity head with more depth and non-linearity
         self.disparity_head = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.ReLU(),
+            nn.Dropout(0.1),  # Add dropout for regularization
             nn.Linear(d_model, d_model // 2),
             nn.ReLU(),
-            nn.Linear(d_model // 2, 1)
+            nn.Dropout(0.1),  # Add dropout for regularization
+            nn.Linear(d_model // 2, d_model // 4),
+            nn.ReLU(),
+            nn.Linear(d_model // 4, 1)
         )
+        
+        # Learnable scalar to scale the disparity predictions to match GT range
+        self.disparity_scale = nn.Parameter(torch.ones(1) * 100.0)  # Initialize with a reasonable scale
         
         # Upsampling factor (DINOv2 uses a patch size of 14 by default)
         self.patch_size = 14
@@ -316,8 +347,9 @@ class StereoTransformerNet(nn.Module):
             align_corners=False
         )
         
-        # Ensure positive disparities
-        coarse_disparity_map = F.softplus(coarse_disparity_map)
+        # Ensure positive disparities and scale to the correct range using the learnable scale
+        # Apply softplus for positive values, then scale by the learned parameter
+        coarse_disparity_map = F.softplus(coarse_disparity_map) * torch.abs(self.disparity_scale)
         
         # Refine the disparity map using the ResNet-style refinement module
         refined_disparity_map = self.refinement_module(left, coarse_disparity_map)
