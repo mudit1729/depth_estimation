@@ -145,6 +145,8 @@ def validate(model, val_loader, criterion, device, epoch=0, writer=None):
     # Metrics for disparity error
     abs_rel_error = 0.0
     rmse_error = 0.0
+    d1_outlier_sum = 0.0  # D1 metric - percentage of disparity outliers
+    d2_outlier_sum = 0.0  # D2 metric - more strict outlier threshold
     
     with torch.no_grad():
         for i, batch in enumerate(tqdm(val_loader, desc='Validating')):
@@ -174,12 +176,29 @@ def validate(model, val_loader, criterion, device, epoch=0, writer=None):
             # RMSE
             rmse = torch.sqrt((abs_diff ** 2).sum() / (valid_mask.sum() + 1e-10))
             
+            # D1 & D2 metrics - percentage of stereo disparity outliers
+            # An outlier is defined as a pixel where the disparity error is:
+            # - greater than 3 pixels, OR
+            # - greater than 5% of the ground truth value
+            
+            # D1 - percentage of disparity outliers in first frame
+            d1_outlier_condition = ((abs_diff > 3.0) | (abs_diff > 0.05 * torch.abs(gt_disp))) & (valid_mask > 0)
+            d1_outlier_percentage = (d1_outlier_condition.float().sum() / (valid_mask.sum() + 1e-10)) * 100.0
+            
+            # D2 would be for second frame disparity, but we're focused on the first frame here
+            # For completeness, we'll calculate another variant:
+            # More strict: outliers with error > 2 pixels OR > 3% of ground truth
+            d2_outlier_condition = ((abs_diff > 2.0) | (abs_diff > 0.03 * torch.abs(gt_disp))) & (valid_mask > 0)
+            d2_outlier_percentage = (d2_outlier_condition.float().sum() / (valid_mask.sum() + 1e-10)) * 100.0
+            
             # Update statistics
             batch_size = left_img.size(0)
             total_loss += loss.item() * batch_size
             total_samples += batch_size
             abs_rel_error += abs_rel.item() * batch_size
             rmse_error += rmse.item() * batch_size
+            d1_outlier_sum += d1_outlier_percentage.item() * batch_size
+            d2_outlier_sum += d2_outlier_percentage.item() * batch_size
             
             # Log first batch to TensorBoard
             if i == 0 and writer is not None:
@@ -204,25 +223,33 @@ def validate(model, val_loader, criterion, device, epoch=0, writer=None):
     if total_samples == 0:
         print("ERROR: No validation samples with ground truth disparity were found!")
         print("Using a default loss value. Please check your dataset configuration.")
-        avg_loss = 1000.0  # A high default value rather than infinity
-        avg_abs_rel = 1.0  # Default high value
-        avg_rmse = 100.0   # Default high value
+        avg_loss = 1000.0     # A high default value rather than infinity
+        avg_abs_rel = 1.0     # Default high value
+        avg_rmse = 100.0      # Default high value
+        avg_d1_outlier = 100.0  # Default: 100% outliers
+        avg_d2_outlier = 100.0  # Default: 100% outliers
     else:
         avg_loss = total_loss / total_samples
         avg_abs_rel = abs_rel_error / total_samples
         avg_rmse = rmse_error / total_samples
+        avg_d1_outlier = d1_outlier_sum / total_samples
+        avg_d2_outlier = d2_outlier_sum / total_samples
     
     # Log to TensorBoard
     if writer is not None:
         writer.add_scalar('val/loss', avg_loss, epoch)
         writer.add_scalar('val/abs_rel_error', avg_abs_rel, epoch)
         writer.add_scalar('val/rmse', avg_rmse, epoch)
+        writer.add_scalar('val/d1_outlier_percentage', avg_d1_outlier, epoch)
+        writer.add_scalar('val/d2_outlier_percentage', avg_d2_outlier, epoch)
         
     # Return average values
     metrics = {
         'loss': avg_loss,
         'abs_rel': avg_abs_rel,
-        'rmse': avg_rmse
+        'rmse': avg_rmse,
+        'd1_outlier': avg_d1_outlier,
+        'd2_outlier': avg_d2_outlier
     }
     
     return metrics
@@ -392,7 +419,11 @@ def main():
         val_losses.append(val_loss)
         
         print(f"Validation Loss: {val_loss:.4f}")
-        print(f"Validation Metrics - Abs Rel: {val_metrics['abs_rel']:.4f}, RMSE: {val_metrics['rmse']:.4f}")
+        print(f"Validation Metrics:")
+        print(f"  - Abs Rel: {val_metrics['abs_rel']:.4f}")
+        print(f"  - RMSE: {val_metrics['rmse']:.4f}")
+        print(f"  - D1 (>3px or >5%): {val_metrics['d1_outlier']:.2f}%")
+        print(f"  - D2 (>2px or >3%): {val_metrics['d2_outlier']:.2f}%")
         
         # Save checkpoint if it's the best model so far
         if val_loss < best_val_loss:

@@ -45,12 +45,27 @@ def calculate_metrics(pred_disp, gt_disp, focal, baseline):
     # Calculate per-pixel absolute disparity error
     abs_diff = torch.abs(pred_disp - gt_disp) * valid_mask
     
+    # D1 & D2 metrics - percentage of stereo disparity outliers
+    # An outlier is defined as a pixel where the disparity error is:
+    # - greater than 3 pixels, OR
+    # - greater than 5% of the ground truth value
+    
+    # D1 - percentage of disparity outliers in first frame
+    d1_outlier_condition = ((abs_diff > 3.0) | (abs_diff > 0.05 * torch.abs(gt_disp))) & (valid_mask > 0)
+    d1_outlier_percentage = (d1_outlier_condition.float().sum() / (valid_mask.sum() + 1e-10)) * 100.0
+    
+    # D2 (stricter) - outliers with error > 2 pixels OR > 3% of ground truth
+    d2_outlier_condition = ((abs_diff > 2.0) | (abs_diff > 0.03 * torch.abs(gt_disp))) & (valid_mask > 0)
+    d2_outlier_percentage = (d2_outlier_condition.float().sum() / (valid_mask.sum() + 1e-10)) * 100.0
+    
     # Calculate error metrics for disparity
     metrics = {
         'abs_rel_disp': (abs_diff / (gt_disp + 1e-10) * valid_mask).sum() / (valid_mask.sum() + 1e-10),
         'rmse_disp': torch.sqrt((abs_diff ** 2).sum() / (valid_mask.sum() + 1e-10)),
         'mae_disp': abs_diff.sum() / (valid_mask.sum() + 1e-10),
         'a1_disp': (torch.max(gt_disp / (pred_disp + 1e-10), pred_disp / (gt_disp + 1e-10)) < 1.25).float().sum() / (valid_mask.sum() + 1e-10),
+        'd1_outlier': d1_outlier_percentage,
+        'd2_outlier': d2_outlier_percentage,
     }
     
     # Convert to depth
@@ -197,6 +212,8 @@ def main():
         print(f"Disparity RMSE: {avg_metrics['rmse_disp']:.4f}")
         print(f"Disparity Abs Rel: {avg_metrics['abs_rel_disp']:.4f}")
         print(f"Disparity <1.25: {avg_metrics['a1_disp']:.4f}")
+        print(f"D1 (>3px or >5%): {avg_metrics['d1_outlier']:.2f}%")
+        print(f"D2 (>2px or >3%): {avg_metrics['d2_outlier']:.2f}%")
         print("-" * 50)
         print(f"Depth MAE: {avg_metrics['mae_depth']:.4f}")
         print(f"Depth RMSE: {avg_metrics['rmse_depth']:.4f}")
