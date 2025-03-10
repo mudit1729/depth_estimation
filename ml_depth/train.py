@@ -14,7 +14,7 @@ from torch.utils.tensorboard import SummaryWriter
 # Import local modules
 from models import StereoTransformerNet
 from dataset import KITTIDataset, ToTensor, Normalize, Resize
-from loss import DisparityLoss, SmoothL1DisparityLoss
+from loss import DisparityLoss, SmoothL1DisparityLoss, CombinedDisparityLoss
 
 # Add numpy import for dataset
 import numpy as np
@@ -32,6 +32,14 @@ def parse_args():
     parser.add_argument('--save_interval', type=int, default=1, help='Checkpoint saving interval in epochs')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu', help='Device to use')
     parser.add_argument('--val_ratio', type=float, default=0.2, help='Ratio of training data to use for validation')
+    
+    # Loss function parameters
+    parser.add_argument('--loss', type=str, default='combined', choices=['l1', 'smoothl1', 'combined'], 
+                       help='Loss function to use')
+    parser.add_argument('--berhu_weight', type=float, default=1.0, help='Weight for BerHu loss component')
+    parser.add_argument('--si_weight', type=float, default=0.5, help='Weight for scale-invariant loss component')
+    parser.add_argument('--edge_weight', type=float, default=0.1, help='Weight for edge-aware smoothness')
+    parser.add_argument('--normal_weight', type=float, default=0.05, help='Weight for normal smoothness')
     
     return parser.parse_args()
 
@@ -87,14 +95,25 @@ def train_one_epoch(model, train_loader, criterion, optimizer, device, epoch, lo
                 continue
             
             # Compute loss
-            loss = criterion(pred_disp, gt_disp, left_img)
+            # Handle different return types between legacy and combined loss
+            if isinstance(criterion, CombinedDisparityLoss):
+                loss, loss_components = criterion(pred_disp, gt_disp, left_img)
+                
+                # Log detailed loss components
+                if writer is not None and i % log_interval == 0:
+                    step = epoch * len(train_loader) + i
+                    for loss_name, loss_val in loss_components.items():
+                        writer.add_scalar(f'train/loss_{loss_name}', loss_val, step)
+            else:
+                loss = criterion(pred_disp, gt_disp, left_img)
             
             # Backward pass and optimize
             loss.backward()
             optimizer.step()
             
             # Update statistics
-            running_loss += loss.item()
+            loss_val = loss.item()
+            running_loss += loss_val
             epoch_loss += loss.item()
             step_count += 1
             
@@ -164,7 +183,10 @@ def validate(model, val_loader, criterion, device, epoch=0, writer=None):
             pred_disp = model(left_img, right_img)
             
             # Compute loss
-            loss = criterion(pred_disp, gt_disp, left_img)
+            if isinstance(criterion, CombinedDisparityLoss):
+                loss, loss_components = criterion(pred_disp, gt_disp, left_img)
+            else:
+                loss = criterion(pred_disp, gt_disp, left_img)
             
             # Compute metrics for disparity
             valid_mask = (gt_disp > 0).float()
@@ -381,20 +403,53 @@ def main():
     writer.add_text('model/architecture', str(model), 0)
     writer.add_text('model/parameters', f"Trainable parameters: {num_trainable_params}", 0)
     
-    # Define loss and optimizer
-    criterion = DisparityLoss(weights={'l1': 1.0, 'smooth': 0.1})
+    # Define loss function based on arguments
+    if args.loss == 'l1':
+        criterion = DisparityLoss(weights={'l1': 1.0, 'smooth': 0.1})
+        print("Using L1 disparity loss with edge-aware smoothness")
+    elif args.loss == 'smoothl1':
+        criterion = SmoothL1DisparityLoss(beta=1.0)
+        print("Using SmoothL1 (Huber) disparity loss")
+    else:  # combined loss
+        criterion = CombinedDisparityLoss(
+            weights={
+                'berhu': args.berhu_weight,
+                'scale_invariant': args.si_weight,
+                'edge_smooth': args.edge_weight,
+                'normal_smooth': args.normal_weight
+            }
+        )
+        print("Using combined disparity loss with:")
+        print(f"  - BerHu weight: {args.berhu_weight}")
+        print(f"  - Scale-invariant weight: {args.si_weight}")
+        print(f"  - Edge-aware smoothness weight: {args.edge_weight}")
+        print(f"  - Normal smoothness weight: {args.normal_weight}")
+    
+    # Define optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     
     # Log hyperparameters
+    hparams = {
+        'lr': args.lr,
+        'batch_size': args.batch_size,
+        'image_height': args.resize[0],
+        'image_width': args.resize[1],
+        'val_ratio': args.val_ratio,
+        'loss_type': args.loss,
+        'model': 'StereoTransformerNet'
+    }
+    
+    # Add loss-specific hyperparameters
+    if args.loss == 'combined':
+        hparams.update({
+            'berhu_weight': args.berhu_weight,
+            'si_weight': args.si_weight,
+            'edge_weight': args.edge_weight,
+            'normal_weight': args.normal_weight
+        })
+    
     writer.add_hparams(
-        {
-            'lr': args.lr,
-            'batch_size': args.batch_size,
-            'image_height': args.resize[0],
-            'image_width': args.resize[1],
-            'val_ratio': args.val_ratio,
-            'model': 'StereoTransformerNet'
-        },
+        hparams,
         {}  # Metrics dict (will be filled during training)
     )
     
