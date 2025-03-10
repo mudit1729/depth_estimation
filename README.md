@@ -67,6 +67,11 @@ Train the model:
 python ml_depth/train.py --data_dir /path/to/kitti --batch_size 4 --num_epochs 20
 ```
 
+Monitor training with TensorBoard:
+```bash
+tensorboard --logdir=runs
+```
+
 Evaluate the model:
 ```bash
 python ml_depth/evaluate.py --data_dir /path/to/kitti --model_path checkpoints/best_model.pth

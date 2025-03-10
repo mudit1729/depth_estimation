@@ -35,6 +35,24 @@ Important parameters:
 - `--lr`: Learning rate (default: 0.0001)
 - `--resize`: Image resize dimensions (default: 256 512)
 - `--save_dir`: Directory to save checkpoints (default: 'checkpoints')
+- `--log_dir`: Directory for TensorBoard logs (default: 'runs')
+- `--val_ratio`: Ratio of training data to use for validation (default: 0.2)
+
+### TensorBoard Monitoring
+
+Training progress can be monitored in real-time using TensorBoard:
+
+```bash
+tensorboard --logdir=runs
+```
+
+The TensorBoard interface provides:
+- Training and validation loss curves
+- Disparity metrics (RMSE, Absolute Relative Error)
+- Input image visualization
+- Ground truth and predicted disparity maps
+- Error maps showing prediction accuracy
+- Model architecture and hyperparameter information
 
 ### Evaluation
 
@@ -57,13 +75,23 @@ Important parameters:
 3. **Stereo Correspondence**: Cross-attention effectively learns to match features between the two views
 4. **Global Context**: Transformer architecture captures long-range dependencies that are crucial for consistent depth estimation
 
+## Dataset Handling
+
+The training script automatically splits the KITTI training data into train and validation sets based on the specified `val_ratio`. This ensures that both training and validation data have ground truth disparity maps available.
+
 ## Requirements
 
 - PyTorch
 - torchvision
 - transformers (Hugging Face)
 - peft (Parameter-Efficient Fine-Tuning)
+- TensorBoard
 - NumPy
 - matplotlib
 - opencv-python
 - tqdm
+
+All dependencies can be installed using:
+```bash
+pip install -r requirements.txt
+```
