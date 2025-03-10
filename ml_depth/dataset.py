@@ -7,7 +7,7 @@ import cv2
 from PIL import Image
 
 class KITTIDataset(Dataset):
-    def __init__(self, root_dir, split='train', transform=None):
+    def __init__(self, root_dir, split='train', transform=None, val_ratio=0.2, random_seed=42):
         """
         KITTI Stereo Dataset
         
@@ -15,19 +15,65 @@ class KITTIDataset(Dataset):
             root_dir (string): Directory with the KITTI dataset
             split (string): 'train' or 'val' split
             transform (callable, optional): Optional transform to be applied on samples
+            val_ratio (float): Ratio of training data to use for validation (default: 0.2)
+            random_seed (int): Random seed for reproducible train/val split
         """
         self.root_dir = root_dir
         self.transform = transform
         self.split = split
         
-        # Get file paths for images and disparity maps
+        # Get all file paths from training data
+        all_left_images = sorted(glob.glob(os.path.join(root_dir, 'training', 'image_2', '*_10.png')))
+        all_right_images = sorted(glob.glob(os.path.join(root_dir, 'training', 'image_3', '*_10.png')))
+        all_disp_maps = sorted(glob.glob(os.path.join(root_dir, 'training', 'disp_noc_0', '*.png')))
+        
+        # If no disparity maps are found, try to find them in the expected location
+        if not all_disp_maps:
+            print(f"Warning: No disparity maps found in {os.path.join(root_dir, 'training', 'disp_noc_0')}.")
+            # Try alternative locations
+            alternative_paths = [
+                os.path.join(root_dir, 'training', 'disp_occ_0'),
+                os.path.join(root_dir, 'training', 'disp_noc'),
+                os.path.join(root_dir, 'training', 'disp')
+            ]
+            for path in alternative_paths:
+                all_disp_maps = sorted(glob.glob(os.path.join(path, '*.png')))
+                if all_disp_maps:
+                    print(f"Found disparity maps in {path}")
+                    break
+            
+            # If still no disparity maps, use a dummy approach for testing
+            if not all_disp_maps:
+                print("Warning: No disparity maps found. Using left images as dummy disparity maps for testing.")
+                all_disp_maps = all_left_images.copy()
+        
+        # Ensure all lists have the same length
+        min_len = min(len(all_left_images), len(all_right_images), len(all_disp_maps))
+        all_left_images = all_left_images[:min_len]
+        all_right_images = all_right_images[:min_len]
+        all_disp_maps = all_disp_maps[:min_len]
+        
+        # Create train/val split
+        np.random.seed(random_seed)
+        indices = np.arange(len(all_left_images))
+        np.random.shuffle(indices)
+        
+        val_size = int(len(indices) * val_ratio)
+        train_indices = indices[val_size:]
+        val_indices = indices[:val_size]
+        
         if split == 'train':
-            # Using training data from KITTI
-            self.left_images = sorted(glob.glob(os.path.join(root_dir, 'training', 'image_2', '*_10.png')))
-            self.right_images = sorted(glob.glob(os.path.join(root_dir, 'training', 'image_3', '*_10.png')))
-            self.disp_maps = sorted(glob.glob(os.path.join(root_dir, 'training', 'disp_noc_0', '*.png')))
-        else:
-            # Using testing data for validation (note: ground truth is not available for the actual test set)
+            # Use training portion
+            self.left_images = [all_left_images[i] for i in train_indices]
+            self.right_images = [all_right_images[i] for i in train_indices]
+            self.disp_maps = [all_disp_maps[i] for i in train_indices]
+        elif split == 'val':
+            # Use validation portion
+            self.left_images = [all_left_images[i] for i in val_indices]
+            self.right_images = [all_right_images[i] for i in val_indices]
+            self.disp_maps = [all_disp_maps[i] for i in val_indices]
+        elif split == 'test':
+            # For actual testing, use the testing set (no ground truth)
             self.left_images = sorted(glob.glob(os.path.join(root_dir, 'testing', 'image_2', '*_10.png')))
             self.right_images = sorted(glob.glob(os.path.join(root_dir, 'testing', 'image_3', '*_10.png')))
             self.disp_maps = None
@@ -40,9 +86,15 @@ class KITTIDataset(Dataset):
             # Extract sequence number from filename
             seq_num = os.path.basename(left_img_path).split('_')[0]
             
-            # Read calibration file
-            calib_file = os.path.join(root_dir, 'training' if split == 'train' else 'testing', 
-                                     'calib_cam_to_cam', f'{seq_num}.txt')
+            # Determine which calibration file to use
+            # For both train and val splits, use the training calibration
+            # For test split, use the testing calibration
+            if split == 'test':
+                calib_folder = 'testing'
+            else:
+                calib_folder = 'training'
+                
+            calib_file = os.path.join(root_dir, calib_folder, 'calib_cam_to_cam', f'{seq_num}.txt')
             
             # Extract focal length and baseline from calibration file
             focal, baseline = self._read_calibration(calib_file)

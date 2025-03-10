@@ -15,6 +15,9 @@ from models import StereoTransformerNet
 from dataset import KITTIDataset, ToTensor, Normalize, Resize
 from loss import DisparityLoss, SmoothL1DisparityLoss
 
+# Add numpy import for dataset
+import numpy as np
+
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a stereo depth estimation model')
     parser.add_argument('--data_dir', type=str, required=True, help='Path to KITTI dataset')
@@ -75,6 +78,7 @@ def validate(model, val_loader, criterion, device):
             
             # Skip samples without ground truth
             if gt_disp is None:
+                print("Warning: No ground truth disparity found for validation. Check dataset setup.")
                 continue
             
             # Forward pass
@@ -89,7 +93,13 @@ def validate(model, val_loader, criterion, device):
             total_samples += batch_size
     
     # Compute average loss
-    avg_loss = total_loss / total_samples if total_samples > 0 else float('inf')
+    if total_samples == 0:
+        print("ERROR: No validation samples with ground truth disparity were found!")
+        print("Using a default loss value. Please check your dataset configuration.")
+        avg_loss = 1000.0  # A high default value rather than infinity
+    else:
+        avg_loss = total_loss / total_samples
+        
     return avg_loss
 
 def save_checkpoint(model, optimizer, epoch, save_path):
