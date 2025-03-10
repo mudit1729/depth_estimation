@@ -158,8 +158,8 @@ class KITTIDataset(Dataset):
                 disp_path = self.disp_maps[idx]
                 
                 # For debugging
-                if idx == 0:
-                    print(f"Loading disparity from: {disp_path}")
+                # if idx == 0:
+                    #print(f"Loading disparity from: {disp_path}")
                 
                 disp_map = cv2.imread(disp_path, cv2.IMREAD_UNCHANGED)
                 
@@ -172,8 +172,8 @@ class KITTIDataset(Dataset):
                     sample['disparity'] = disp_map
                     
                     # Print stats for debugging
-                    if idx == 0:
-                        print(f"Disparity stats - shape: {disp_map.shape}, min: {disp_map.min()}, max: {disp_map.max()}")
+                    #if idx == 0:
+                        #print(f"Disparity stats - shape: {disp_map.shape}, min: {disp_map.min()}, max: {disp_map.max()}")
             
             except Exception as e:
                 if idx == 0:
@@ -194,7 +194,7 @@ class ToTensor(object):
         if not hasattr(self, 'debug_shown'):
             self.debug_shown = True
             has_disparity = 'disparity' in sample
-            print(f"Dataset debug info: {'Has disparity maps' if has_disparity else 'NO DISPARITY MAPS FOUND'}")
+            #print(f"Dataset debug info: {'Has disparity maps' if has_disparity else 'NO DISPARITY MAPS FOUND'}")
             
             if has_disparity:
                 disparity = sample['disparity']
@@ -202,7 +202,7 @@ class ToTensor(object):
                     shape_info = f"2D shape: {disparity.shape}"
                 else:
                     shape_info = f"3D shape: {disparity.shape}"
-                print(f"Disparity info: {shape_info}, min: {disparity.min():.2f}, max: {disparity.max():.2f}")
+                #print(f"Disparity info: {shape_info}, min: {disparity.min():.2f}, max: {disparity.max():.2f}")
         
         # Convert images from HWC to CHW format
         left_image = sample['left_image'].transpose((2, 0, 1))
