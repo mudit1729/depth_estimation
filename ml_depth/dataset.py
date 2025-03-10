@@ -25,27 +25,33 @@ class KITTIDataset(Dataset):
         # Get all file paths from training data
         all_left_images = sorted(glob.glob(os.path.join(root_dir, 'training', 'image_2', '*_10.png')))
         all_right_images = sorted(glob.glob(os.path.join(root_dir, 'training', 'image_3', '*_10.png')))
-        all_disp_maps = sorted(glob.glob(os.path.join(root_dir, 'training', 'disp_noc_0', '*.png')))
         
-        # If no disparity maps are found, try to find them in the expected location
-        if not all_disp_maps:
-            print(f"Warning: No disparity maps found in {os.path.join(root_dir, 'training', 'disp_noc_0')}.")
-            # Try alternative locations
-            alternative_paths = [
-                os.path.join(root_dir, 'training', 'disp_occ_0'),
-                os.path.join(root_dir, 'training', 'disp_noc'),
-                os.path.join(root_dir, 'training', 'disp')
-            ]
-            for path in alternative_paths:
-                all_disp_maps = sorted(glob.glob(os.path.join(path, '*.png')))
-                if all_disp_maps:
-                    print(f"Found disparity maps in {path}")
+        # Find disparities - we need to check multiple folders for these
+        # Based on the actual directory structure
+        disp_paths = [
+            os.path.join(root_dir, 'training', 'disp_noc_0'),
+            os.path.join(root_dir, 'training', 'disp_noc_1'),
+            os.path.join(root_dir, 'training', 'disp_occ_0'),
+            os.path.join(root_dir, 'training', 'disp_occ_1')
+        ]
+        
+        all_disp_maps = []
+        
+        print("Searching for disparity maps...")
+        for path in disp_paths:
+            if os.path.exists(path):
+                disp_files = sorted(glob.glob(os.path.join(path, '*_10.png')))
+                if disp_files:
+                    all_disp_maps = disp_files
+                    print(f"Found {len(disp_files)} disparity maps in {path}")
                     break
-            
-            # If still no disparity maps, use a dummy approach for testing
-            if not all_disp_maps:
-                print("Warning: No disparity maps found. Using left images as dummy disparity maps for testing.")
-                all_disp_maps = all_left_images.copy()
+        
+        # If still no disparity maps found, create dummy ones
+        if not all_disp_maps:
+            print("WARNING: No disparity maps found in any of the standard locations.")
+            print("This may indicate a problem with your dataset structure.")
+            print("Using left images as dummy disparities for testing purposes.")
+            all_disp_maps = all_left_images.copy()
         
         # Ensure all lists have the same length
         min_len = min(len(all_left_images), len(all_right_images), len(all_disp_maps))
@@ -145,11 +151,33 @@ class KITTIDataset(Dataset):
             'baseline': baseline
         }
         
-        # Load ground truth disparity map if available (only for training data)
-        if self.split == 'train' and self.disp_maps is not None:
-            # KITTI disparity maps are stored as uint16 PNG with a scale factor of 256
-            disp_map = cv2.imread(self.disp_maps[idx], cv2.IMREAD_UNCHANGED).astype(np.float32) / 256.0
-            sample['disparity'] = disp_map
+        # Load ground truth disparity map if available
+        if self.disp_maps is not None:
+            try:
+                # KITTI disparity maps are stored as uint16 PNG with a scale factor of 256
+                disp_path = self.disp_maps[idx]
+                
+                # For debugging
+                if idx == 0:
+                    print(f"Loading disparity from: {disp_path}")
+                
+                disp_map = cv2.imread(disp_path, cv2.IMREAD_UNCHANGED)
+                
+                if disp_map is None:
+                    if idx == 0:
+                        print(f"Error: Could not load disparity map from {disp_path}")
+                else:
+                    # Convert to float and scale
+                    disp_map = disp_map.astype(np.float32) / 256.0
+                    sample['disparity'] = disp_map
+                    
+                    # Print stats for debugging
+                    if idx == 0:
+                        print(f"Disparity stats - shape: {disp_map.shape}, min: {disp_map.min()}, max: {disp_map.max()}")
+            
+            except Exception as e:
+                if idx == 0:
+                    print(f"Error loading disparity map: {e}")
         
         # Apply transformations
         if self.transform:
@@ -162,6 +190,20 @@ class ToTensor(object):
     """Convert numpy arrays in sample to PyTorch tensors."""
     
     def __call__(self, sample):
+        # Debug information - only shown for the very first call
+        if not hasattr(self, 'debug_shown'):
+            self.debug_shown = True
+            has_disparity = 'disparity' in sample
+            print(f"Dataset debug info: {'Has disparity maps' if has_disparity else 'NO DISPARITY MAPS FOUND'}")
+            
+            if has_disparity:
+                disparity = sample['disparity']
+                if len(disparity.shape) == 2:
+                    shape_info = f"2D shape: {disparity.shape}"
+                else:
+                    shape_info = f"3D shape: {disparity.shape}"
+                print(f"Disparity info: {shape_info}, min: {disparity.min():.2f}, max: {disparity.max():.2f}")
+        
         # Convert images from HWC to CHW format
         left_image = sample['left_image'].transpose((2, 0, 1))
         right_image = sample['right_image'].transpose((2, 0, 1))
@@ -177,11 +219,13 @@ class ToTensor(object):
         # Add disparity if available
         if 'disparity' in sample:
             disparity = sample['disparity']
+            
             # Add a channel dimension if needed
             if len(disparity.shape) == 2:
                 disparity = disparity[None, :, :]  # Add channel dimension
             else:
                 disparity = disparity.transpose((2, 0, 1))
+                
             output['disparity'] = torch.from_numpy(disparity).float()
         
         return output
